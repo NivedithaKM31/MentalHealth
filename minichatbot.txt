@@ -1,0 +1,87 @@
+from google.colab import drive
+drive.mount('/content/drive')
+
+!pip install langchain sentence-transformers chromadb llama-cpp-python langchain_community pypdf
+
+from langchain_community.document_loaders import PyPDFDirectoryLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.embeddings import SentenceTransformerEmbeddings
+from langchain.vectorstores import Chroma
+from langchain_community.llms import LlamaCpp
+from langchain.chains import RetrievalQA,LLMChain
+
+loader=PyPDFDirectoryLoader("/content/drive/MyDrive/")
+docs=loader.load()
+
+len(docs)#number of pages
+
+docs[10]
+
+text_splitter=RecursiveCharacterTextSplitter(chunk_size=200,chunk_overlap=20)
+chunks=text_splitter.split_documents(docs)
+
+len(chunks)
+
+chunks[200]
+
+import os
+os.environ['HUGGINGFACEHUB_API_TOKEN'] = "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"
+
+embeddings=SentenceTransformerEmbeddings(model_name="NeuML/pubmedbert-base-embeddings")
+
+vectorestore=Chroma.from_documents(chunks,embeddings)
+
+query="who are at the risk of mental health?"
+search_results=vectorestore.similarity_search(query)
+
+search_results
+
+retriever=vectorestore.as_retriever(search_kwargs={"k":5})
+
+retriever.get_relevant_documents(query)
+
+llm=LlamaCpp(
+    model_path="/content/drive/MyDrive/BioMistral-7B.Q4_K_M.gguf",
+    temperature=0.2,
+    max_tokens=2000,
+    top_p=1
+)
+
+template="""
+<|context|>
+You are Medical Assistant that follows the instructions and generate the accurate response based on the query and the context provided.
+Please be truthful and give direct answers.
+</s>
+<|user|>
+{query}
+</s>
+<|assistant|>
+"""
+
+from langchain.schema.runnable import RunnablePassthrough
+from langchain.schema.output_parser import StrOutputParser
+from langchain.prompts import ChatPromptTemplate
+
+prompt=ChatPromptTemplate.from_template(template)
+
+rag_chain=(
+    {"context":retriever,"query":RunnablePassthrough()}
+    | prompt
+    | llm
+    | StrOutputParser()
+)
+
+response=rag_chain.invoke(query)
+
+response
+
+import sys
+while True:
+  user_input=input(f"Input query: ")
+  if user_input=="exit":
+    print("Exiting...")
+    sys.exit()
+    if user_input=="":
+      continue
+  result=rag_chain.invoke(user_input)
+  print("Answer: ",result)
